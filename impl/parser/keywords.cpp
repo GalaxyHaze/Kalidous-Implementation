@@ -1,9 +1,7 @@
 // impl/parser/keywords.cpp
-#include "Nova/parse/keywords.h"
-#include "Nova/parse/tokens.h"
+#include "Nova/nova.h"
 #include <string_view>
 #include <array>
-#include <cstdint>
 
 // --- Hash functions (same as before) ---
 static constexpr uint64_t mix64(uint64_t x) {
@@ -27,7 +25,7 @@ static constexpr uint64_t hash64(const std::string_view sv) {
 // --- Keyword table (same as before) ---
 static constexpr auto TokenTable = std::to_array<std::pair<std::string_view, NovaTokenType>>({
     // Types
-    {"i8",      NOVA_TOKEN_TYPE}, {"i16",     NOVA_TOKEN_TYPE}, {"i32",     NOVA_TOKEN_TYPE},
+    {"i8",      NOVA_TOKEN_IDENTIFIER}, {"i16",     NOVA_TOKEN_TYPE}, {"i32",     NOVA_TOKEN_TYPE},
     {"i64",     NOVA_TOKEN_TYPE}, {"u8",      NOVA_TOKEN_TYPE}, {"u16",     NOVA_TOKEN_TYPE},
     {"u32",     NOVA_TOKEN_TYPE}, {"u64",     NOVA_TOKEN_TYPE}, {"f32",     NOVA_TOKEN_TYPE},
     {"f64",     NOVA_TOKEN_TYPE}, {"bool",    NOVA_TOKEN_TYPE}, {"void",    NOVA_TOKEN_TYPE},

@@ -1,6 +1,6 @@
 // src/utils/file.c
 //#include "../../include/Nova/utils/i_o_utils.h"
-#include "../../include/Nova/memory/arena_c_functions.h"
+#include <Nova/nova.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,11 +22,11 @@ static int is_regular_file(const char* path) {
     return S_ISREG(st.st_mode);
 }
 
-int nova_file_exists(const char* path) {
+bool nova_file_exists(const char* path) {
     return access(path, F_OK) == 0;
 }
 
-int nova_file_is_regular(const char* path) {
+bool nova_file_is_regular(const char* path) {
     return is_regular_file(path);
 }
 

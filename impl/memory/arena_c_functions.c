@@ -1,5 +1,5 @@
 // src/arena.c
-#include "../../include/Nova/memory/arena_c_functions.h"
+#include <Nova/nova.h>
 #include <stdlib.h>
 #include <string.h>
 

@@ -1,23 +1,22 @@
 // impl/parse/tokenizer.cpp
-#include "Nova/parse/tokenizer.h"
-#include "Nova/parse/keywords.h"
-#include "Nova/parse/tokens.h"
-#include "Nova/memory/arena_c_functions.h"
-#include "Nova/utils/helpers.h"
+#include "Nova/nova.h"
 #include <string_view>
 #include <vector>
 #include <cstring>
 #include <iostream>
-#include <cstdint>
+
+#define NOVA_NEWLINE(loc) do { \
+(loc)->line++; \
+(loc)->index = 0; \
+} while(0)
 
 namespace nova::detail {
 
 struct LexError {
     const char* msg;      // ← agora é const char*, não string_view
-    NovaInfo info;
+    NovaSourceLoc info;
 };
-
-using namespace nova::helpers;
+    
 
 // Helper: format small integers to string (base 10)
 static void uint_to_str(char* buf, size_t buf_size, uint64_t value) {
@@ -58,16 +57,16 @@ static const char* make_error_msg(NovaArena* arena, const char* prefix, uint64_t
     return msg;
 }
 
-static NovaToken make_token(NovaArena* arena, NovaTokenType type, std::string_view lexeme, NovaInfo info) {
-    char* buf = static_cast<char*>(nova_arena_alloc(arena, lexeme.size()));
+static NovaToken make_token(NovaArena* arena, NovaTokenType type, std::string_view lexeme, NovaSourceLoc info) {
+    const auto buf = static_cast<char*>(nova_arena_alloc(arena, lexeme.size()));
     if (buf && !lexeme.empty()) {
         std::memcpy(buf, lexeme.data(), lexeme.size());
     }
     return NovaToken{
-        .value = buf,
-        .value_len = lexeme.size(),
-        .info = info,
-        .token = type
+        .lexeme = {buf, lexeme.size()},
+        .loc    = info,
+        .type   = type,
+        .keyword_id = 0
     };
 }
 
@@ -79,28 +78,28 @@ static unsigned char toLower(unsigned char c) { return ::tolower(c); }
 
 // Forward declarations
 static void processIdentifier(const char*& current, const char* end,
-                              std::vector<NovaToken>& tokens, NovaInfo& info,
+                              std::vector<NovaToken>& tokens, NovaSourceLoc& info,
                               NovaArena* arena);
 static void processString(const char*& current, const char* end,
                           std::vector<NovaToken>& tokens, std::vector<LexError>& errors,
-                          NovaInfo& info, NovaArena* arena);
+                          NovaSourceLoc& info, NovaArena* arena);
 static void processNumber(const char*& current, const char* end,
-                          std::vector<NovaToken>& tokens, NovaInfo& info,
+                          std::vector<NovaToken>& tokens, NovaSourceLoc& info,
                           std::vector<LexError>& errors, NovaArena* arena);
 static bool punctuation(const char*& current, const char* end,
-                        std::vector<NovaToken>& tokens, NovaInfo& info,
+                        std::vector<NovaToken>& tokens, NovaSourceLoc& info,
                         NovaArena* arena);
 
-static void skipSingleLine(NovaInfo& info, const char*& current, const char* end) {
+static void skipSingleLine(NovaSourceLoc& info, const char*& current, const char* end) {
     while (current < end && *current != '\n') {
         ++current;
         ++info.index;
     }
 }
 
-static void skipMultiLine(NovaInfo& info, const char*& current, const char* end,
+static void skipMultiLine(NovaSourceLoc& info, const char*& current, const char* end,
                           std::vector<LexError>& errors, NovaArena* arena) {
-    NovaInfo start = info;
+    const auto start = info;
     current += 2;
     info.index += 2;
 
@@ -133,18 +132,18 @@ static void addError(std::vector<LexError>& errors, const char* base_msg, char c
     stack_buf[pos] = '\0';
     const char* prefix = stack_buf;
     const char* msg = make_error_msg(arena, prefix, line);
-    errors.push_back({msg, NovaInfo{1, line}});
+    errors.push_back({msg, NovaSourceLoc{1, line}});
 }
 
 static void processIdentifier(const char*& current, const char* end,
-                              std::vector<NovaToken>& tokens, NovaInfo& info,
+                              std::vector<NovaToken>& tokens, NovaSourceLoc& info,
                               NovaArena* arena) {
     const char* start = current;
     while (current < end && (isAlphaNum(*current) || *current == '_')) {
         ++current;
         ++info.index;
     }
-    std::string_view lexeme(start, current - start);
+    const std::string_view lexeme(start, current - start);
     NovaTokenType type = nova_lookup_keyword(start, current - start);
     if (type == NOVA_TOKEN_IDENTIFIER) {
         type = NOVA_TOKEN_IDENTIFIER;
@@ -154,8 +153,8 @@ static void processIdentifier(const char*& current, const char* end,
 
 static void processString(const char*& current, const char* end,
                           std::vector<NovaToken>& tokens, std::vector<LexError>& errors,
-                          NovaInfo& info, NovaArena* arena) {
-    NovaInfo startInfo = info;
+                          NovaSourceLoc& info, NovaArena* arena) {
+    NovaSourceLoc startInfo = info;
     const char* start = current;
     ++current; ++info.index;
 
@@ -184,10 +183,10 @@ static void processString(const char*& current, const char* end,
 }
 
 static void processNumber(const char*& current, const char* end,
-                          std::vector<NovaToken>& tokens, NovaInfo& info,
+                          std::vector<NovaToken>& tokens, NovaSourceLoc& info,
                           std::vector<LexError>& errors, NovaArena* arena) {
     const char* start = current;
-    const NovaInfo startInfo = info;
+    const NovaSourceLoc startInfo = info;
 
     bool isHex = false, isBin = false, isFloat = false;
 
@@ -225,7 +224,7 @@ static void processNumber(const char*& current, const char* end,
 }
 
 static bool punctuation(const char*& current, const char* end,
-                        std::vector<NovaToken>& tokens, NovaInfo& info,
+                        std::vector<NovaToken>& tokens, NovaSourceLoc& info,
                         NovaArena* arena) {
     for (const int len : {3, 2, 1}) {
         if (current + len > end) continue;
@@ -244,12 +243,12 @@ std::vector<NovaToken> tokenize(std::string_view src, NovaArena* arena, std::vec
     std::vector<NovaToken> tokens;
     tokens.reserve(src.size() / 2 + 1);
 
-    NovaInfo info{};
+    NovaSourceLoc info{};
     const char* current = src.data();
     const char* end = src.data() + src.size();
 
     while (current < end) {
-        char c = *current;
+        const char c = *current;
 
         if (isSpace(c)) {
             if (c == '\n') NOVA_NEWLINE(&info);
@@ -297,14 +296,14 @@ std::vector<NovaToken> tokenize(std::string_view src, NovaArena* arena, std::vec
 
 } // namespace nova::detail
 
-extern "C" NovaTokenSlice nova_tokenize(NovaArena* arena, const char* source, size_t source_len) {
+NovaTokenStream nova_tokenize(NovaArena *arena, const char *source, const size_t source_len) {
     if (!arena || !source) {
         return {nullptr, 0};
     }
 
     std::string_view src(source, source_len);
     std::vector<nova::detail::LexError> errors;
-    auto tokens = nova::detail::tokenize(src, arena, errors);
+    const auto tokens = nova::detail::tokenize(src, arena, errors);
 
     if (!errors.empty()) {
         for (const auto&[msg, info] : errors) {
@@ -319,5 +318,7 @@ extern "C" NovaTokenSlice nova_tokenize(NovaArena* arena, const char* source, si
     if (!out) return {nullptr, 0};
 
     std::memcpy(out, tokens.data(), total_size);
-    return NovaTokenSlice{.data = out, .len = tokens.size()};
+    return NovaTokenStream{.data = out, .len = tokens.size()};
 }
+
+#undef NOVA_TOKEN_IDENTIFIER

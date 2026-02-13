@@ -1,18 +1,11 @@
-// impl/interface/CLI.cpp
-#include "Nova/interface/CLI.h"
-#include "Nova/memory/arena_c_functions.h"
-#include "Nova/utils/i_o_utils.h"
-#include "Nova/parse/tokenizer.h"
-#include "Nova/parse/ast.h"
+
 #include <CLI/CLI.hpp>
 #include <iostream>
 #include <string>
-#include <cstring>
-#include <cstdlib>
 
-#include "Nova/memory/file.h"
+#include "Nova/nova.h"
 
-extern "C" const char* nova_version = NOVA_VERSION;
+const char* nova_version = NOVA_VERSION;
 
 // ============================================================================
 // Helpers internos (C++ apenas)
@@ -49,14 +42,14 @@ static int cmd_compile(const std::string& input_file, const std::string& output_
     }
 
     size_t file_size = 0;
-    char* source = nova_load_file_to_arena(arena, input_file.c_str(), &file_size);
+    const char* source = nova_load_file_to_arena(arena, input_file.c_str(), &file_size);
     if (!source) {
         print_error(("Failed to load file: " + input_file).c_str());
         nova_arena_destroy(arena);
         return 1;
     }
 
-    NovaTokenSlice tokens = nova_tokenize(arena, source, file_size);
+    const NovaTokenStream tokens = nova_tokenize(arena, source, file_size);
     if (!tokens.data) {
         // nova_tokenize aborts on error, but just in case:
         nova_arena_destroy(arena);
@@ -67,8 +60,7 @@ static int cmd_compile(const std::string& input_file, const std::string& output_
         std::cout << "✨ Tokenized " << tokens.len << " tokens\n";
     }
 
-    NovaNode ast = nova_parse(tokens, arena);
-    if (!ast) {
+    /*if (const auto ast = nova_parse(arena, tokens); !ast) {
         print_error("AST parsing failed");
         nova_arena_destroy(arena);
         return 1;
@@ -76,7 +68,7 @@ static int cmd_compile(const std::string& input_file, const std::string& output_
 
     if (verbose) {
         std::cout << "🌳 AST built successfully\n";
-    }
+    }*/
 
     // TODO: Code generation, LLVM IR emission, etc.
     // For now, just simulate success
@@ -132,7 +124,7 @@ static int cmd_version() {
 
 static int cmd_help() {
     // CLI11 will handle --help automatically, but we provide a custom banner
-    std::cout << R"(Nova Compiler - A low-level general-purpose language
+    std::cout << R"(Nova - A low-level general-purpose language
 
 USAGE:
     nova [OPTIONS] <COMMAND> [ARGS]
@@ -165,7 +157,7 @@ EXAMPLES:
     nova check lib.nova -v
 
 LEARN MORE:
-    Source: https://github.com/your-username/Nova
+    Source: https://github.com/GalaxyHaze/Nova
     Docs:   https://nova-lang.dev (coming soon)
 )";
     return 0;
@@ -175,8 +167,8 @@ LEARN MORE:
 // Dispatch central: nova_run (C API)
 // ============================================================================
 
-extern "C" int nova_run(int argc, const char* argv[]) {
-    CLI::App app{"Nova Compiler - A low-level general-purpose language"};
+extern "C" int nova_run(const int argc, const char* argv[]) {
+    CLI::App app{"Nova - A low-level general-purpose language"};
 
     // Global options (apply to all commands)
     std::string mode_str = "debug";
