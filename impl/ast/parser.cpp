@@ -10,9 +10,9 @@
 // ============================================================================
 
 void parser_init(Parser* p, KalidousArena* arena,
-                 const char* source, size_t source_len,
+                 const char* source, const size_t source_len,
                  const char* filename,
-                 KalidousTokenStream tokens) {
+                 const KalidousTokenStream tokens) {
     p->arena              = arena;
     p->source             = source;
     p->source_len         = source_len;
@@ -113,8 +113,8 @@ void kalidous_diag_print_all(const KalidousDiagList* diags,
 
 // ── Internal emit ────────────────────────────────────────────────────────────
 
-static void parser_emit(Parser* p, KalidousSourceLoc loc,
-                         KalidousDiagSeverity severity, const char* msg) {
+static void parser_emit(Parser* p, const KalidousSourceLoc loc,
+                         const KalidousDiagSeverity severity, const char* msg) {
     // Grow the diagnostic array if needed (arena-allocated, no free)
     if (p->diags.count >= p->diags.capacity) {
         const size_t new_cap = p->diags.capacity == 0 ? 8 : p->diags.capacity * 2;
@@ -904,6 +904,41 @@ KalidousNode* parser_parse_statement(Parser* p) {
         }
 
         default: {
+            // check_kw fallback for 'entry' tokenized as IDENTIFIER
+            // (happens when KALIDOUS_TOKEN_ENTRY is not yet in kalidous.h)
+            if (parser_peek(p)->type == KALIDOUS_TOKEN_ENTRY || check_kw(p, "entry")) {
+                parser_advance(p);
+                if (p->inside_fn && p->fn_kind == KALIDOUS_FN_NORMAL)
+                    parser_error(p, loc, "'entry' not allowed in normal fn");
+                if (p->inside_fn && p->fn_kind == KALIDOUS_FN_ASYNC)
+                    parser_error(p, loc, "'entry' not allowed in async fn");
+
+                const char* ename     = nullptr;
+                size_t      ename_len = 0;
+                if (parser_check(p, KALIDOUS_TOKEN_IDENTIFIER)) {
+                    const KalidousToken* t = parser_advance(p);
+                    ename     = t->lexeme.data;
+                    ename_len = t->lexeme.len;
+                }
+                ArenaList<KalidousNode*> params_b;
+                params_b.init(p->arena, 4);
+                if (ename && parser_match(p, KALIDOUS_TOKEN_LPAREN)) {
+                    while (!parser_check(p, KALIDOUS_TOKEN_RPAREN) && !parser_is_at_end(p)) {
+                        params_b.push(p->arena, parse_param(p));
+                        if (!parser_match(p, KALIDOUS_TOKEN_COMMA)) break;
+                    }
+                    parser_expect(p, KALIDOUS_TOKEN_RPAREN, "expected ')' after entry params");
+                }
+                size_t         param_count = 0;
+                KalidousNode** params      = params_b.flatten(p->arena, &param_count);
+                KalidousNode*  body        = parse_body(p);
+                const KalidousMarkerPayload data = {
+                    ename, ename_len, params, param_count, body
+                };
+                return kalidous_ast_make_entry(p->arena, loc, data);
+            }
+
+            // Expression statement / assignment
             KalidousNode* expr = parser_parse_expression(p);
             const KalidousTokenType op = parser_peek(p)->type;
             if (op == KALIDOUS_TOKEN_ASSIGNMENT   ||
@@ -1061,7 +1096,7 @@ static KalidousNode* parse_struct_decl(Parser* p, KalidousVisibility struct_vis)
                                                      fn_loc, item_vis));
             continue;
         }
-        if (parser_check(p, KALIDOUS_TOKEN_FN)) {
+        if (check_kw(p, "noreturn")) {
             const KalidousSourceLoc fn_loc = parser_peek(p)->loc;
             parser_advance(p);
             parser_expect(p, KALIDOUS_TOKEN_FN, "expected 'fn' after 'noreturn'");
@@ -1229,12 +1264,14 @@ KalidousNode* parser_parse_declaration(Parser* p) {
         parser_expect(p, KALIDOUS_TOKEN_FN, "expected 'fn' after 'async'");
         return parse_func_body(p, KALIDOUS_FN_ASYNC, loc, vis);
     }
-    if (check_kw(p, "noreturn")) {
+    // noreturn — dedicated token if available, fallback to check_kw for older builds
+    if (t == KALIDOUS_TOKEN_NORETURN || check_kw(p, "noreturn")) {
         parser_advance(p);
         parser_expect(p, KALIDOUS_TOKEN_FN, "expected 'fn' after 'noreturn'");
         return parse_func_body(p, KALIDOUS_FN_NORETURN, loc, vis);
     }
-    if (check_kw(p, "flowing")) {
+    // flowing — dedicated token if available, fallback to check_kw
+    if (t == KALIDOUS_TOKEN_FLOWING || check_kw(p, "flowing")) {
         parser_advance(p);
         parser_expect(p, KALIDOUS_TOKEN_FN, "expected 'fn' after 'flowing'");
         return parse_func_body(p, KALIDOUS_FN_FLOWING, loc, vis);
