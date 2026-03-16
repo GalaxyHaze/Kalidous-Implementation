@@ -93,6 +93,7 @@ set(PARSER_CPP_SOURCES
         impl/ast/ast.h
         impl/ast/ast.cpp
         impl/ast/parser.h
+        impl/parser/tokenizer.cpp
 )
 
 # REMOVED parser.cpp from CLI_SOURCES to prevent duplicate compilation
